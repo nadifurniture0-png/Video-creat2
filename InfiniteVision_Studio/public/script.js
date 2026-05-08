@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   InfiniteVision Studio — Frontend Logic v1.1 (Vercel Fixed)
+   InfiniteVision Studio — Frontend Logic v1.2 (Infinite Flow)
    ═══════════════════════════════════════════════════════════════ */
 
 // ─── State ──────────────────────────────────────────────────────
@@ -8,9 +8,7 @@ const state = {
   currentVideoUrl: null,
   videoHistory: [],
   isGenerating: false,
-  apiToken: localStorage.getItem("iv_api_token") || "",
-  serverUrl: localStorage.getItem("iv_server_url") || "", // 🔴 Localhost ඉවත් කර හිස් කරන ලදී 
-  model: localStorage.getItem("iv_model") || "luma/ray",
+  serverUrl: localStorage.getItem("iv_server_url") || "",
 };
 
 // ─── DOM ─────────────────────────────────────────────────────────
@@ -108,35 +106,21 @@ function showToast(msg, icon = "✓", duration = 3500) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// ─── Improved API call with better error messages ─────────────────
+// ─── API Call ─────────────────────────────────────────────────────
 async function apiCall(endpoint, body) {
   const url = `${state.serverUrl}${endpoint}`;
-  
   try {
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-
     const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || `Server error: ${response.status}`);
-    }
-
+    if (!response.ok) throw new Error(data.error || `Server error: ${response.status}`);
     return data;
-
   } catch (err) {
     if (err.name === "TypeError" && err.message.includes("fetch")) {
-      throw new Error(
-        `Server එකට connect වෙන්න බැරි වුණා!\n\n` +
-        `✅ Check කරන්න:\n` +
-        `1. Terminal එකේ "npm start" run කළාද?\n` +
-        `2. Server URL: ${state.serverUrl}\n` +
-        `3. Port 3000 block නෑ නේද?\n\n` +
-        `(Failed to connect to ${url})`
-      );
+      throw new Error(`Server එකට connect වෙන්න බැරි වුණා! Terminal එකේ "npm start" run කළාද?`);
     }
     throw err;
   }
@@ -157,7 +141,7 @@ dropZone.addEventListener("drop", (e) => {
   dropZone.classList.remove("drag-over");
   const file = e.dataTransfer.files[0];
   if (file && file.type.startsWith("image/")) handleImageFile(file);
-  else showToast("Image file එකක් drop කරන්න (PNG, JPG, WEBP)", "⚠️");
+  else showToast("Image file එකක් drop කරන්න", "⚠️");
 });
 
 function handleImageFile(file) {
@@ -212,10 +196,8 @@ function setBusy(active, mode = "generate") {
     btnExtend.querySelector(".btn-content").innerHTML = `<span class="spinner"></span> Extending...`;
     setStatus("processing", label);
   } else {
-    btnGenerate.querySelector(".btn-content").innerHTML =
-      `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 3 19 12 5 21 5 3"/></svg> Generate Video`;
-    btnExtend.querySelector(".btn-content").innerHTML =
-      `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg> Extend This Video`;
+    btnGenerate.querySelector(".btn-content").innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 3 19 12 5 21 5 3"/></svg> Generate Video`;
+    btnExtend.querySelector(".btn-content").innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg> Extend This Video`;
     setStatus("ready", "Ready");
   }
 }
@@ -239,31 +221,40 @@ function startProgressSim() {
 }
 function stopProgressSim() { clearInterval(progressInterval); }
 
-// ─── Server connection test ───────────────────────────────────────
 async function testServerConnection() {
   try {
     const res = await fetch(`${state.serverUrl}/api/health`, { signal: AbortSignal.timeout(5000) });
     return res.ok;
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 }
 
-// ─── GENERATE ─────────────────────────────────────────────────────
+// ─── 🔴 අලුත්: අවසන් රූපය ලබා ගැනීමේ ක්‍රමය (Capture Last Frame) ───
+function captureLastFrame() {
+  return new Promise((resolve) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = videoPlayer.videoWidth || 1280;
+    canvas.height = videoPlayer.videoHeight || 720;
+    const ctx = canvas.getContext("2d");
+    
+    // වීඩියෝවේ අවසාන මොහොතට යන්න
+    videoPlayer.currentTime = videoPlayer.duration || 0;
+    
+    setTimeout(() => {
+      ctx.drawImage(videoPlayer, 0, 0, canvas.width, canvas.height);
+      const base64Image = canvas.toDataURL("image/jpeg", 0.9);
+      resolve(base64Image);
+    }, 300); // Frame එක load වෙන්න පොඩි වෙලාවක් දෙනවා
+  });
+}
+
+// ─── GENERATE (පළමු වීඩියෝව) ──────────────────────────────────────
 btnGenerate.addEventListener("click", async () => {
   const prompt = promptGenerate.value.trim();
   if (!prompt && !state.uploadedImageBase64) {
     showToast("Image එකක් upload කරන්න හෝ prompt එකක් ලියන්න", "⚠️");
     return;
   }
-  if (!state.apiToken) {
-    showToast("Settings (⚙️) එකේ Replicate API token add කරන්න", "🔑");
-    openSettingsModal();
-    return;
-  }
 
-  setStatus("processing", "Server check...");
-  
   setBusy(true, "generate");
   showPanel("panelProgress");
   setProgress(5, "Starting generation...");
@@ -272,9 +263,7 @@ btnGenerate.addEventListener("click", async () => {
   try {
     const data = await apiCall("/api/generate", {
       prompt,
-      imageBase64: state.uploadedImageBase64 || null,
-      apiToken: state.apiToken,
-      model: state.model,
+      imageBase64: state.uploadedImageBase64 || null
     });
 
     stopProgressSim();
@@ -282,7 +271,7 @@ btnGenerate.addEventListener("click", async () => {
     await sleep(600);
 
     state.currentVideoUrl = data.videoUrl;
-    state.videoHistory = [{ url: data.videoUrl, label: "Original" }];
+    state.videoHistory = [{ url: data.videoUrl, label: "Part 1" }];
     loadVideo(data.videoUrl);
     setBusy(false);
     showPanels("panelPlayer");
@@ -295,28 +284,29 @@ btnGenerate.addEventListener("click", async () => {
     setStatus("error", "Error");
     showPanel("panelGenerate");
     showToast(err.message.split("\n")[0], "❌", 7000);
-    console.error("[Generate]", err);
   }
 });
 
-// ─── EXTEND ───────────────────────────────────────────────────────
+// ─── 🔴 EXTEND (වීඩියෝව එක දිගට ගෙන යාම) ──────────────────────────
 btnExtend.addEventListener("click", async () => {
   const prompt = promptExtend.value.trim();
   if (!prompt) { showToast("ඊළඟට වෙන දේ describe කරන්න", "⚠️"); promptExtend.focus(); return; }
   if (!state.currentVideoUrl) { showToast("Extend කරන්න video එකක් නෑ", "⚠️"); return; }
-  if (!state.apiToken) { showToast("API token add කරන්න", "🔑"); openSettingsModal(); return; }
 
   setBusy(true, "extend");
   showPanel("panelProgress");
-  setProgress(5, "Video extension prepare කරනවා...");
+  setProgress(5, "පරණ වීඩියෝවේ අන්තිම රූපය ලබාගනිමින් පවතී...");
+  
+  // 1. පරණ වීඩියෝවේ අන්තිම රූපය ලබාගැනීම
+  const lastFrameBase64 = await captureLastFrame();
+  
   startProgressSim();
 
   try {
-    const data = await apiCall("/api/extend", {
-      sourceVideoUrl: state.currentVideoUrl,
-      prompt,
-      apiToken: state.apiToken,
-      model: state.model,
+    // 2. අලුත් Generate API එකටම පින්තූරය යැවීම
+    const data = await apiCall("/api/generate", {
+      prompt: prompt + " (Seamless continuation)",
+      imageBase64: lastFrameBase64
     });
 
     stopProgressSim();
@@ -324,13 +314,14 @@ btnExtend.addEventListener("click", async () => {
     await sleep(600);
 
     state.currentVideoUrl = data.videoUrl;
-    state.videoHistory.push({ url: data.videoUrl, label: `Extension ${state.videoHistory.length}` });
+    state.videoHistory.push({ url: data.videoUrl, label: `Part ${state.videoHistory.length + 1}` });
+    
     loadVideo(data.videoUrl);
     promptExtend.value = "";
     setBusy(false);
     showPanels("panelPlayer", "panelHistory");
     renderHistory();
-    showToast("Video extend වුණා! ✨", "🎬");
+    showToast("වීඩියෝව සාර්ථකව සම්බන්ධ විය! ✨", "🎬");
 
   } catch (err) {
     stopProgressSim();
@@ -338,7 +329,6 @@ btnExtend.addEventListener("click", async () => {
     setStatus("error", "Error");
     showPanels("panelPlayer");
     showToast(err.message.split("\n")[0], "❌", 7000);
-    console.error("[Extend]", err);
   }
 });
 
@@ -359,11 +349,23 @@ videoPlayer.addEventListener("pause", () => {
   bigPlayBtn.innerHTML = `<svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>`;
 });
 
+// 🔴 බහු වීඩියෝ (Playlist) Playback ක්‍රමය
+videoPlayer.addEventListener("ended", () => {
+   // දැනට ප්ලේ වෙන එක ඉවර වුණාම, ඊළඟ එකක් තියෙනවා නම් ඒක ප්ලේ වෙනවා
+   const currentIndex = state.videoHistory.findIndex(v => v.url === state.currentVideoUrl);
+   if (currentIndex >= 0 && currentIndex < state.videoHistory.length - 1) {
+       const nextVideoUrl = state.videoHistory[currentIndex + 1].url;
+       state.currentVideoUrl = nextVideoUrl;
+       loadVideo(nextVideoUrl);
+       showToast(`Playing Part ${currentIndex + 2}`, "▶️", 2000);
+   }
+});
+
 btnDownload.addEventListener("click", () => {
   if (!state.currentVideoUrl) return;
   const a = document.createElement("a");
   a.href = state.currentVideoUrl;
-  a.download = `infinitevision_${Date.now()}.mp4`;
+  a.download = `infinitevision_part_${Date.now()}.mp4`;
   a.target = "_blank";
   document.body.appendChild(a);
   a.click();
@@ -420,80 +422,25 @@ function renderHistory() {
   });
 }
 
-// ─── Settings Modal ───────────────────────────────────────────────
-function openSettingsModal() {
-  apiTokenInput.value = state.apiToken;
-  serverUrlInput.value = state.serverUrl;
-  modelSelect.value = state.model;
-  updateTokenStatus();
-  modalBackdrop.classList.add("open");
-}
+// ─── Settings Modal (API Key ඉවත් කර ඇත) ─────────────────────────
+function openSettingsModal() { modalBackdrop.classList.add("open"); }
 function closeSettingsModal() { modalBackdrop.classList.remove("open"); }
-function updateTokenStatus() {
-  const has = !!apiTokenInput.value.trim();
-  tokenStatus.classList.toggle("has-token", has);
-  tokenStatusText.textContent = has
-    ? `Token set කළා ✅ (${apiTokenInput.value.slice(0, 8)}...)`
-    : "Token නෑ — Replicate API token add කරන්න";
-}
 
 btnSettings.addEventListener("click", openSettingsModal);
 modalClose.addEventListener("click", closeSettingsModal);
 btnModalCancel.addEventListener("click", closeSettingsModal);
 modalBackdrop.addEventListener("click", (e) => { if (e.target === modalBackdrop) closeSettingsModal(); });
-apiTokenInput.addEventListener("input", updateTokenStatus);
-
-btnToggleToken.addEventListener("click", () => {
-  const show = apiTokenInput.type === "password";
-  apiTokenInput.type = show ? "text" : "password";
-  $("eyeIcon").innerHTML = show
-    ? `<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>`
-    : `<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>`;
-});
-
-btnModalSave.addEventListener("click", () => {
-  state.apiToken = apiTokenInput.value.trim();
-  state.serverUrl = serverUrlInput.value.trim() || ""; // 🔴 Localhost ඉවත් කර හිස් කරන ලදී
-  state.model = modelSelect.value;
-  localStorage.setItem("iv_api_token", state.apiToken);
-  localStorage.setItem("iv_server_url", state.serverUrl);
-  localStorage.setItem("iv_model", state.model);
-  closeSettingsModal();
-  showToast("Settings save වුණා! ✅", "✅");
-
-  // Auto-test connection
-  testServerConnection().then(ok => {
-    if (ok) setStatus("ready", "Server Connected ✅");
-    else { setStatus("error", "Server offline"); showToast(`Server connect වෙන්න බැරි — "npm start" run කළාද?`, "⚠️", 5000); }
-  });
-});
-
-// ─── Keyboard Shortcuts ───────────────────────────────────────────
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && modalBackdrop.classList.contains("open")) closeSettingsModal();
-  if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !state.isGenerating) btnGenerate.click();
-  if ((e.metaKey || e.ctrlKey) && e.key === ",") { e.preventDefault(); openSettingsModal(); }
-});
 
 // ─── Init ─────────────────────────────────────────────────────────
 (function init() {
   showPanel("panelGenerate");
   setStatus("ready", "Ready");
-  if (state.apiToken) updateTokenStatus();
-
-  // Auto-check server connection
+  
   testServerConnection().then(ok => {
-    if (ok) {
-      setStatus("ready", "Server Connected ✅");
-    } else {
-      setStatus("error", "Server offline");
-    }
+    if (ok) setStatus("ready", "Server Connected ✅");
+    else setStatus("error", "Server offline");
   });
 
-  if (!state.apiToken) {
-    setTimeout(() => showToast("⚙️ Settings click කරලා API token add කරන්න", "💡", 5000), 1500);
-  }
-
-  console.log("%c🎬 InfiniteVision Studio v1.1%c\nFixed: Native fetch, better error messages", 
+  console.log("%c🎬 InfiniteVision Studio v1.2%c\nInfinite Flow Integrated", 
     "font-size:16px;font-weight:bold;color:#3b82f6;", "color:#8899b0;");
 })();
