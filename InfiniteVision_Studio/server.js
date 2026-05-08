@@ -24,7 +24,7 @@ app.post('/api/generate', async (req, res) => {
         }
 
         let payload = {
-            model: "cogvideox-flash", // 🔴 අලුත්ම නොමිලේ දෙන මොඩල් එක 
+            model: "cogvideox-flash", 
             prompt: prompt
         };
 
@@ -32,22 +32,37 @@ app.post('/api/generate', async (req, res) => {
             payload.image_url = imageBase64;
         }
 
-        const startRes = await fetch('https://open.bigmodel.cn/api/paas/v4/videos/generations', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${apiToken}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(payload)
-        });
+        let startData;
+        let retries = 4; // 🔴 සර්වර් එක බිසී නම් 4 වතාවක්ම ට්‍රයි කරනවා!
 
-        const startData = await startRes.json();
+        while (retries > 0) {
+            const startRes = await fetch('https://open.bigmodel.cn/api/paas/v4/videos/generations', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${apiToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            startData = await startRes.json();
+
+            // "访问量过大" (High traffic) Error එක ආවොත්...
+            if (startData.error && startData.error.message && startData.error.message.includes("访问量过大")) {
+                console.log(`[Z.ai] Server is busy. Retrying... (${retries} attempts left)`);
+                retries--;
+                await new Promise(resolve => setTimeout(resolve, 5000)); // තත්පර 5ක් ඉඳලා ආයේ ට්‍රයි කරනවා
+            } else {
+                break; // සාර්ථක වුණොත් Loop එකෙන් එළියට එනවා
+            }
+        }
 
         if (startData.error) throw new Error(startData.error.message || "වීඩියෝව ආරම්භ කිරීමට නොහැකි විය.");
 
         const taskId = startData.id;
         let videoUrl = null;
 
+        // වීඩියෝව හැදෙනකම් පරීක්ෂා කිරීම (Polling)
         while (true) {
             await new Promise(resolve => setTimeout(resolve, 4000));
             const pollRes = await fetch(`https://open.bigmodel.cn/api/paas/v4/async-result/${taskId}`, {
@@ -79,17 +94,33 @@ app.post('/api/extend', async (req, res) => {
 
         if (!apiToken) return res.status(400).json({ error: "Z.ai API Token missing" });
 
-        const startRes = await fetch('https://open.bigmodel.cn/api/paas/v4/videos/generations', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                model: "cogvideox-flash", // 🔴 අලුත්ම නොමිලේ දෙන මොඩල් එක
-                prompt: prompt + " (Cinematic continuation, exact same style and characters)" 
-            })
-        });
+        let payload = {
+            model: "cogvideox-flash", 
+            prompt: prompt + " (Cinematic continuation, exact same style and characters)" 
+        };
 
-        const startData = await startRes.json();
-        if (startData.error) throw new Error(startData.error.message);
+        let startData;
+        let retries = 4; // Extend කරද්දිත් සර්වර් බිසී නම් ආයේ ට්‍රයි කරනවා
+
+        while (retries > 0) {
+            const startRes = await fetch('https://open.bigmodel.cn/api/paas/v4/videos/generations', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            startData = await startRes.json();
+
+            if (startData.error && startData.error.message && startData.error.message.includes("访问量过大")) {
+                console.log(`[Z.ai] Server is busy. Retrying... (${retries} attempts left)`);
+                retries--;
+                await new Promise(resolve => setTimeout(resolve, 5000));
+            } else {
+                break;
+            }
+        }
+
+        if (startData.error) throw new Error(startData.error.message || "Extension generation failed.");
 
         const taskId = startData.id;
         let videoUrl = null;
