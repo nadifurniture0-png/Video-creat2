@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>InfiniteVision Studio — AI Video Generation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Inter:wght@300;400;500&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ─── Ambient Background ─────────────────────────────────────── -->
+  <div class="ambient-bg">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+    <div class="grid-overlay"></div>
+  </div>
+
+  <!-- ─── Header ─────────────────────────────────────────────────── -->
+  <header class="header">
+    <div class="logo">
+      <span class="logo-icon">∞</span>
+      <div class="logo-text">
+        <span class="logo-main">InfiniteVision</span>
+        <span class="logo-sub">STUDIO</span>
+      </div>
+    </div>
+    <nav class="header-nav">
+      <span class="status-dot" id="statusDot"></span>
+      <span class="status-text" id="statusText">Ready</span>
+      <button class="btn-settings" id="btnSettings" title="API Settings">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        Settings
+      </button>
+    </nav>
+  </header>
+
+  <!-- ─── Main Workspace ─────────────────────────────────────────── -->
+  <main class="workspace">
+
+    <!-- ─── Step 1: Image Upload + Prompt ────────────────────────── -->
+    <section class="panel panel-generate" id="panelGenerate">
+      <div class="panel-header">
+        <div class="step-badge">01</div>
+        <div>
+          <h2 class="panel-title">Starting Frame</h2>
+          <p class="panel-desc">Upload an image to animate, or generate from prompt alone</p>
+        </div>
+      </div>
+
+      <!-- Drop Zone -->
+      <div class="drop-zone" id="dropZone">
+        <input type="file" id="fileInput" accept="image/*" hidden />
+        <div class="drop-zone-idle" id="dropZoneIdle">
+          <div class="drop-icon">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+          </div>
+          <p class="drop-title">Drop your image here</p>
+          <p class="drop-subtitle">or <span class="link-accent" id="browseLink">browse files</span> · PNG, JPG, WEBP</p>
+        </div>
+        <div class="drop-zone-preview" id="dropZonePreview" style="display:none">
+          <img id="previewImg" src="" alt="Preview" />
+          <button class="btn-remove-img" id="btnRemoveImg" title="Remove image">✕</button>
+        </div>
+      </div>
+
+      <!-- Prompt -->
+      <div class="prompt-group">
+        <label class="prompt-label">Animation Prompt</label>
+        <div class="textarea-wrapper">
+          <textarea
+            id="promptGenerate"
+            class="prompt-input"
+            rows="3"
+            placeholder="A camera slowly pulls back revealing a vast cosmic nebula, stars twinkling into existence..."
+          ></textarea>
+          <div class="char-count" id="charCount">0 / 500</div>
+        </div>
+      </div>
+
+      <!-- Generate Button -->
+      <button class="btn-generate" id="btnGenerate">
+        <span class="btn-glow"></span>
+        <span class="btn-content">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+          </svg>
+          Generate Video
+        </span>
+      </button>
+    </section>
+
+    <!-- ─── Progress Panel (hidden by default) ─────────────────────── -->
+    <section class="panel panel-progress" id="panelProgress" style="display:none">
+      <div class="progress-scene">
+        <div class="progress-ring-wrap">
+          <svg class="progress-ring" viewBox="0 0 120 120">
+            <circle class="progress-ring-track" cx="60" cy="60" r="50"/>
+            <circle class="progress-ring-fill" cx="60" cy="60" r="50" id="progressCircle"/>
+          </svg>
+          <div class="progress-center">
+            <span class="progress-icon">🎬</span>
+            <span class="progress-pct" id="progressPct">0%</span>
+          </div>
+        </div>
+        <p class="progress-label" id="progressLabel">Initializing generation engine...</p>
+        <div class="progress-steps">
+          <div class="pstep" id="pstep1"><span class="pstep-dot"></span>Uploading assets</div>
+          <div class="pstep" id="pstep2"><span class="pstep-dot"></span>AI processing frames</div>
+          <div class="pstep" id="pstep3"><span class="pstep-dot"></span>Rendering video</div>
+          <div class="pstep" id="pstep4"><span class="pstep-dot"></span>Finalizing output</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── Step 2: Video Player + Extend ─────────────────────────── -->
+    <section class="panel panel-player" id="panelPlayer" style="display:none">
+      <div class="panel-header">
+        <div class="step-badge">02</div>
+        <div>
+          <h2 class="panel-title">Your Creation</h2>
+          <p class="panel-desc">Preview, download, or extend your generated video</p>
+        </div>
+      </div>
+
+      <!-- Video Player -->
+      <div class="video-wrap">
+        <video id="videoPlayer" class="video-player" controls loop>
+          Your browser does not support the video tag.
+        </video>
+        <div class="video-overlay" id="videoOverlay">
+          <button class="play-btn-big" id="bigPlayBtn">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="5 3 19 12 5 21 5 3"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Video Actions -->
+      <div class="video-actions">
+        <button class="btn-icon" id="btnDownload" title="Download Video">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Download
+        </button>
+        <button class="btn-icon" id="btnCopyUrl" title="Copy Video URL">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+          Copy URL
+        </button>
+        <button class="btn-icon btn-reset" id="btnReset" title="Start Over">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="1 4 1 10 7 10"/>
+            <path d="M3.51 15a9 9 0 1 0 .49-4.5"/>
+          </svg>
+          New Project
+        </button>
+      </div>
+
+      <!-- Extension Panel -->
+      <div class="extend-panel" id="extendPanel">
+        <div class="extend-divider">
+          <div class="extend-line"></div>
+          <span class="extend-badge">🎬 EXTEND VIDEO</span>
+          <div class="extend-line"></div>
+        </div>
+        <p class="extend-desc">What happens next? Continue the story with AI.</p>
+        <div class="textarea-wrapper">
+          <textarea
+            id="promptExtend"
+            class="prompt-input"
+            rows="3"
+            placeholder="The camera continues to zoom out, revealing a fleet of starships emerging from hyperspace..."
+          ></textarea>
+        </div>
+        <button class="btn-extend" id="btnExtend">
+          <span class="btn-glow btn-glow-purple"></span>
+          <span class="btn-content">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M5 12h14M12 5l7 7-7 7"/>
+            </svg>
+            Extend This Video
+          </span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ─── Video History ─────────────────────────────────────────── -->
+    <section class="panel panel-history" id="panelHistory" style="display:none">
+      <div class="panel-header">
+        <div class="step-badge step-badge-sm">📼</div>
+        <div>
+          <h2 class="panel-title">Sequence History</h2>
+          <p class="panel-desc">Your extended video sequence</p>
+        </div>
+      </div>
+      <div class="history-grid" id="historyGrid"></div>
+    </section>
+
+  </main>
+
+  <!-- ─── Toast Notification ─────────────────────────────────────── -->
+  <div class="toast" id="toast">
+    <span class="toast-icon" id="toastIcon">✓</span>
+    <span class="toast-msg" id="toastMsg">Done!</span>
+  </div>
+
+  <!-- ─── Settings Modal ─────────────────────────────────────────── -->
+  <div class="modal-backdrop" id="modalBackdrop">
+    <div class="modal" id="settingsModal">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">⚙️</span>
+          <h3 class="modal-title">API Configuration</h3>
+        </div>
+        <button class="modal-close" id="modalClose">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="setting-group">
+          <label class="setting-label">Replicate API Token</label>
+          <p class="setting-hint">
+            Get your token at
+            <a href="https://replicate.com/account/api-tokens" target="_blank" class="link-accent">
+              replicate.com/account/api-tokens
+            </a>
+          </p>
+          <div class="token-input-wrap">
+            <input
+              type="password"
+              id="apiTokenInput"
+              class="setting-input"
+              placeholder="r8_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            />
+            <button class="btn-toggle-token" id="btnToggleToken" title="Show/hide token">
+              <svg id="eyeIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <label class="setting-label">AI Model</label>
+          <p class="setting-hint">Select the video generation model to use</p>
+          <select id="modelSelect" class="setting-input setting-select">
+            <option value="luma/ray">Luma Ray (Recommended)</option>
+            <option value="minimax/video-01">MiniMax Video-01</option>
+            <option value="luma/ray-flash-2">Luma Ray Flash 2 (Fast)</option>
+          </select>
+        </div>
+
+        <div class="setting-group">
+          <label class="setting-label">Server URL</label>
+          <p class="setting-hint">Backend server address (default: localhost:3000)</p>
+          <input
+            type="text"
+            id="serverUrlInput"
+            class="setting-input"
+            placeholder="http://localhost:3000"
+            value="http://localhost:3000"
+          />
+        </div>
+
+        <div class="token-status" id="tokenStatus">
+          <span class="token-status-dot"></span>
+          <span id="tokenStatusText">No token configured</span>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn-modal-cancel" id="btnModalCancel">Cancel</button>
+        <button class="btn-modal-save" id="btnModalSave">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          Save Settings
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Script ─────────────────────────────────────────────────── -->
+  <script src="script.js"></script>
+</body>
+</html>
