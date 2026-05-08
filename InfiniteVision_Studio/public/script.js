@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   InfiniteVision Studio — Frontend Logic v1.1 (Fixed)
+   InfiniteVision Studio — Frontend Logic v1.1 (Vercel Fixed)
    ═══════════════════════════════════════════════════════════════ */
 
 // ─── State ──────────────────────────────────────────────────────
@@ -9,7 +9,7 @@ const state = {
   videoHistory: [],
   isGenerating: false,
   apiToken: localStorage.getItem("iv_api_token") || "",
-  serverUrl: localStorage.getItem("iv_server_url") || "http://localhost:3000",
+  serverUrl: localStorage.getItem("iv_server_url") || "", // 🔴 Localhost ඉවත් කර හිස් කරන ලදී 
   model: localStorage.getItem("iv_model") || "luma/ray",
 };
 
@@ -128,7 +128,6 @@ async function apiCall(endpoint, body) {
     return data;
 
   } catch (err) {
-    // Detailed error messages in Sinhala context
     if (err.name === "TypeError" && err.message.includes("fetch")) {
       throw new Error(
         `Server එකට connect වෙන්න බැරි වුණා!\n\n` +
@@ -263,15 +262,8 @@ btnGenerate.addEventListener("click", async () => {
     return;
   }
 
-  // Test server first
   setStatus("processing", "Server check...");
-  const serverOk = await testServerConnection();
-  if (!serverOk) {
-    setStatus("error", "Server offline");
-    showToast(`Server offline! Terminal එකේ "npm start" run කළාද? (${state.serverUrl})`, "❌", 6000);
-    return;
-  }
-
+  
   setBusy(true, "generate");
   showPanel("panelProgress");
   setProgress(5, "Starting generation...");
@@ -313,9 +305,6 @@ btnExtend.addEventListener("click", async () => {
   if (!prompt) { showToast("ඊළඟට වෙන දේ describe කරන්න", "⚠️"); promptExtend.focus(); return; }
   if (!state.currentVideoUrl) { showToast("Extend කරන්න video එකක් නෑ", "⚠️"); return; }
   if (!state.apiToken) { showToast("API token add කරන්න", "🔑"); openSettingsModal(); return; }
-
-  const serverOk = await testServerConnection();
-  if (!serverOk) { showToast(`Server offline! "npm start" run කළාද?`, "❌", 5000); return; }
 
   setBusy(true, "extend");
   showPanel("panelProgress");
@@ -464,7 +453,7 @@ btnToggleToken.addEventListener("click", () => {
 
 btnModalSave.addEventListener("click", () => {
   state.apiToken = apiTokenInput.value.trim();
-  state.serverUrl = serverUrlInput.value.trim() || "http://localhost:3000";
+  state.serverUrl = serverUrlInput.value.trim() || ""; // 🔴 Localhost ඉවත් කර හිස් කරන ලදී
   state.model = modelSelect.value;
   localStorage.setItem("iv_api_token", state.apiToken);
   localStorage.setItem("iv_server_url", state.serverUrl);
@@ -498,9 +487,6 @@ document.addEventListener("keydown", (e) => {
       setStatus("ready", "Server Connected ✅");
     } else {
       setStatus("error", "Server offline");
-      setTimeout(() => {
-        showToast(`Server offline! Terminal එකේ "npm start" run කරන්න 🚀`, "⚠️", 6000);
-      }, 800);
     }
   });
 
