@@ -1,164 +1,133 @@
-require("dotenv").config();
-const express = require("express");
-const cors = require("cors");
-const path = require("path");
-const https = require("https");
-const http = require("http");
+const express = require('express');
+const cors = require('cors');
+require('dotenv').config();
 
 const app = express();
+app.use(cors());
+
+// 🔴 පින්තූර අප්ලෝඩ් කරන්න ලොකු සයිස් එකක් (50MB) ලබා දීම අනිවාර්යයි
+app.use(express.json({ limit: '50mb' }));
+app.use(express.static('public'));
+
+// ─── Health Check (Frontend එකෙන් සර්වර් එක බලන තැන) ───
+app.get('/api/health', (req, res) => {
+    res.status(200).json({ status: 'ok' });
+});
+
+// ─── Zhipu AI (CogVideoX) Image-to-Video Generation ───
+app.post('/api/generate', async (req, res) => {
+    try {
+        // UI එකේ Settings වලින් එන Z.ai API Key එක
+        const apiToken = req.body.apiToken;
+        const { prompt, imageBase64 } = req.body;
+
+        if (!apiToken) {
+            return res.status(400).json({ error: "Z.ai API Token එක Settings වලට ඇතුළත් කරන්න!" });
+        }
+
+        // 1. Z.ai වෙත ඉල්ලීම යැවීම
+        let payload = {
+            model: "cogvideox", // Zhipu AI හි වීඩියෝ මොඩලය
+            prompt: prompt
+        };
+
+        if (imageBase64) {
+            payload.image_url = imageBase64;
+        }
+
+        const startRes = await fetch('https://open.bigmodel.cn/api/paas/v4/videos/generations', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiToken}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const startData = await startRes.json();
+
+        if (startData.error) {
+            throw new Error(startData.error.message || "Z.ai එකෙන් වීඩියෝව ආරම්භ කිරීමට නොහැකි විය.");
+        }
+
+        const taskId = startData.id;
+        console.log(`[Z.ai] Task Started: ${taskId}`);
+
+        // 2. වීඩියෝව හැදෙනකම් Backend එකෙන් පරීක්ෂා කිරීම (Polling)
+        let videoUrl = null;
+        while (true) {
+            await new Promise(resolve => setTimeout(resolve, 4000)); // තත්පර 4ක් රැඳීම
+
+            const pollRes = await fetch(`https://open.bigmodel.cn/api/paas/v4/async-result/${taskId}`, {
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${apiToken}` }
+            });
+
+            const pollData = await pollRes.json();
+
+            if (pollData.task_status === 'SUCCESS') {
+                videoUrl = pollData.video_result[0].url;
+                console.log(`[Z.ai] Task Success: ${videoUrl}`);
+                break;
+            } else if (pollData.task_status === 'FAIL') {
+                throw new Error("Z.ai වීඩියෝව සෑදීම අසාර්ථක විය.");
+            }
+            // PROCESSING නම් දිගටම Loop එක වැඩ කරයි
+        }
+
+        // සාර්ථක වුණාම Frontend එකට Video URL එක යවනවා
+        res.json({ videoUrl: videoUrl });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ─── Extend Video (Z.ai සඳහා සකස් කරන ලදී) ───
+app.post('/api/extend', async (req, res) => {
+    try {
+        const apiToken = req.body.apiToken;
+        const { prompt } = req.body;
+
+        if (!apiToken) return res.status(400).json({ error: "Z.ai API Token missing" });
+
+        // CogVideoX එකේ Video-to-Video නැති නිසා, කතාව දිගටම යන විදිහට අලුත් Scene එකක් හදනවා
+        const startRes = await fetch('https://open.bigmodel.cn/api/paas/v4/videos/generations', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                model: "cogvideox", 
+                prompt: prompt + " (Cinematic continuation, exact same style and characters)" 
+            })
+        });
+
+        const startData = await startRes.json();
+        if (startData.error) throw new Error(startData.error.message);
+
+        const taskId = startData.id;
+        let videoUrl = null;
+
+        while (true) {
+            await new Promise(resolve => setTimeout(resolve, 4000));
+            const pollRes = await fetch(`https://open.bigmodel.cn/api/paas/v4/async-result/${taskId}`, {
+                headers: { 'Authorization': `Bearer ${apiToken}` }
+            });
+            const pollData = await pollRes.json();
+
+            if (pollData.task_status === 'SUCCESS') {
+                videoUrl = pollData.video_result[0].url; break;
+            } else if (pollData.task_status === 'FAIL') {
+                throw new Error("Extension generation failed.");
+            }
+        }
+
+        res.json({ videoUrl: videoUrl });
+
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 const PORT = process.env.PORT || 3000;
-
-// ─── CORS — fix "Failed to Fetch" ────────────────────────────────
-app.use(cors({ origin: "*", methods: ["GET","POST","OPTIONS"], allowedHeaders: ["Content-Type","Authorization","x-api-token"] }));
-app.options("*", cors());
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true, limit: "50mb" }));
-app.use(express.static(path.join(__dirname, "public")));
-
-// ─── Native HTTPS request (no node-fetch needed) ─────────────────
-function httpsRequest(url, options = {}, body = null) {
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(url);
-    const lib = parsed.protocol === "https:" ? https : http;
-    const reqOptions = {
-      hostname: parsed.hostname,
-      port: parsed.port || (parsed.protocol === "https:" ? 443 : 80),
-      path: parsed.pathname + parsed.search,
-      method: options.method || "GET",
-      headers: options.headers || {},
-    };
-    const req = lib.request(reqOptions, (res) => {
-      let data = "";
-      res.on("data", (chunk) => (data += chunk));
-      res.on("end", () => {
-        try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
-        catch { resolve({ status: res.statusCode, body: data }); }
-      });
-    });
-    req.on("error", reject);
-    if (body) req.write(typeof body === "string" ? body : JSON.stringify(body));
-    req.end();
-  });
-}
-
-async function replicateRequest(endpoint, method, body, apiToken) {
-  const result = await httpsRequest(
-    `https://api.replicate.com/v1${endpoint}`,
-    { method, headers: { "Authorization": `Bearer ${apiToken}`, "Content-Type": "application/json" } },
-    body
-  );
-  if (result.status >= 400) {
-    throw new Error(result.body?.detail || result.body?.error || `HTTP ${result.status}`);
-  }
-  return result.body;
-}
-
-async function pollForCompletion(predictionId, apiToken, maxAttempts = 120, intervalMs = 4000) {
-  for (let i = 0; i < maxAttempts; i++) {
-    const p = await replicateRequest(`/predictions/${predictionId}`, "GET", null, apiToken);
-    console.log(`[Poll] ${predictionId} → ${p.status} (${i+1}/${maxAttempts})`);
-    if (p.status === "succeeded") return p;
-    if (p.status === "failed" || p.status === "canceled") throw new Error(p.error || `Prediction ${p.status}`);
-    await new Promise(r => setTimeout(r, intervalMs));
-  }
-  throw new Error("Timed out waiting for video generation.");
-}
-
-function extractVideoUrl(output) {
-  if (!output) return null;
-  if (typeof output === "string") return output;
-  if (Array.isArray(output)) return output[0];
-  return null;
-}
-
-// ─── Health ───────────────────────────────────────────────────────
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", message: "InfiniteVision Studio running 🚀", port: PORT });
-});
-
-// ─── Generate ─────────────────────────────────────────────────────
-app.post("/api/generate", async (req, res) => {
-  const { imageBase64, imageUrl, prompt, apiToken } = req.body;
-  const token = apiToken || process.env.REPLICATE_API_TOKEN;
-  if (!token) return res.status(401).json({ error: "No API token. Add it in ⚙️ Settings." });
-  if (!prompt) return res.status(400).json({ error: "Prompt is required." });
-
-  try {
-    console.log("\n[Generate] Prompt:", prompt);
-    const input = { prompt, aspect_ratio: "16:9", loop: false };
-    if (imageBase64) input.start_image_url = imageBase64;
-    else if (imageUrl) input.start_image_url = imageUrl;
-
-    const prediction = await replicateRequest("/models/luma/ray/predictions", "POST", { input }, token);
-    console.log("[Generate] ID:", prediction.id, "Status:", prediction.status);
-
-    if (prediction.status === "succeeded") {
-      return res.json({ videoUrl: extractVideoUrl(prediction.output), predictionId: prediction.id });
-    }
-
-    const completed = await pollForCompletion(prediction.id, token);
-    const videoUrl = extractVideoUrl(completed.output);
-    if (!videoUrl) throw new Error("No video URL in response.");
-
-    console.log("[Generate] ✅", videoUrl);
-    return res.json({ videoUrl, predictionId: completed.id });
-  } catch (err) {
-    console.error("[Generate] ❌", err.message);
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Extend ───────────────────────────────────────────────────────
-app.post("/api/extend", async (req, res) => {
-  const { sourceVideoUrl, prompt, apiToken } = req.body;
-  const token = apiToken || process.env.REPLICATE_API_TOKEN;
-  if (!token) return res.status(401).json({ error: "No API token. Add it in ⚙️ Settings." });
-  if (!sourceVideoUrl) return res.status(400).json({ error: "sourceVideoUrl is required." });
-  if (!prompt) return res.status(400).json({ error: "Prompt is required." });
-
-  try {
-    console.log("\n[Extend] Source:", sourceVideoUrl);
-    console.log("[Extend] Prompt:", prompt);
-    const input = { prompt, aspect_ratio: "16:9", loop: false, start_video_url: sourceVideoUrl };
-    const prediction = await replicateRequest("/models/luma/ray/predictions", "POST", { input }, token);
-    console.log("[Extend] ID:", prediction.id, "Status:", prediction.status);
-
-    if (prediction.status === "succeeded") {
-      return res.json({ videoUrl: extractVideoUrl(prediction.output), predictionId: prediction.id });
-    }
-
-    const completed = await pollForCompletion(prediction.id, token);
-    const videoUrl = extractVideoUrl(completed.output);
-    if (!videoUrl) throw new Error("No video URL in response.");
-
-    console.log("[Extend] ✅", videoUrl);
-    return res.json({ videoUrl, predictionId: completed.id });
-  } catch (err) {
-    console.error("[Extend] ❌", err.message);
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/api/status/:id", async (req, res) => {
-  const token = req.headers["x-api-token"] || process.env.REPLICATE_API_TOKEN;
-  if (!token) return res.status(401).json({ error: "No token" });
-  try {
-    const p = await replicateRequest(`/predictions/${req.params.id}`, "GET", null, token);
-    return res.json(p);
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
-});
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log("\n╔══════════════════════════════════════════╗");
-  console.log("║     🎬  InfiniteVision Studio             ║");
-  console.log(`║  ✅  http://localhost:${PORT}               ║`);
-  console.log("║  ✅  Native HTTPS (no node-fetch)         ║");
-  console.log("║  ✅  CORS all origins                     ║");
-  console.log("╚══════════════════════════════════════════╝\n");
-});
+app.listen(PORT, () => console.log(`[Z.ai] Server running on port ${PORT}`));
