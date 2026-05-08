@@ -1,17 +1,18 @@
 /* ═══════════════════════════════════════════════════════════════
-   InfiniteVision Studio — Frontend Logic v1.2 (Infinite Flow)
+   InfiniteVision Studio — v1.4 (Full: UI + Infinite Flow + Gallery)
    ═══════════════════════════════════════════════════════════════ */
 
 // ─── State ──────────────────────────────────────────────────────
 const state = {
   uploadedImageBase64: null,
   currentVideoUrl: null,
-  videoHistory: [],
+  // 🔴 Gallery එක ෆෝන් එකේ මතකයෙන් (localStorage) load කිරීම
+  videoHistory: JSON.parse(localStorage.getItem("iv_gallery")) || [],
   isGenerating: false,
   serverUrl: localStorage.getItem("iv_server_url") || "",
 };
 
-// ─── DOM ─────────────────────────────────────────────────────────
+// ─── DOM Elements ────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
 
 const dropZone        = $("dropZone");
@@ -40,54 +41,13 @@ const btnReset        = $("btnReset");
 const btnExtend       = $("btnExtend");
 const promptExtend    = $("promptExtend");
 const historyGrid     = $("historyGrid");
-const btnSettings     = $("btnSettings");
-const modalBackdrop   = $("modalBackdrop");
-const modalClose      = $("modalClose");
-const btnModalCancel  = $("btnModalCancel");
-const btnModalSave    = $("btnModalSave");
-const apiTokenInput   = $("apiTokenInput");
-const serverUrlInput  = $("serverUrlInput");
-const modelSelect     = $("modelSelect");
-const btnToggleToken  = $("btnToggleToken");
-const tokenStatus     = $("tokenStatus");
-const tokenStatusText = $("tokenStatusText");
-const statusDot       = $("statusDot");
-const statusText      = $("statusText");
 const toast           = $("toast");
 const toastIcon       = $("toastIcon");
 const toastMsg        = $("toastMsg");
-
-// ─── Progress Ring SVG gradient ──────────────────────────────────
-const svgNS = "http://www.w3.org/2000/svg";
-const progressRingSvg = document.querySelector(".progress-ring");
-const defs = document.createElementNS(svgNS, "defs");
-const grad = document.createElementNS(svgNS, "linearGradient");
-grad.setAttribute("id", "progressGradient");
-grad.setAttribute("x1", "0%"); grad.setAttribute("y1", "0%");
-grad.setAttribute("x2", "100%"); grad.setAttribute("y2", "0%");
-const stop1 = document.createElementNS(svgNS, "stop");
-stop1.setAttribute("offset", "0%"); stop1.setAttribute("stop-color", "#3b82f6");
-const stop2 = document.createElementNS(svgNS, "stop");
-stop2.setAttribute("offset", "100%"); stop2.setAttribute("stop-color", "#8b5cf6");
-grad.appendChild(stop1); grad.appendChild(stop2);
-defs.appendChild(grad);
-progressRingSvg.prepend(defs);
-progressCircle.setAttribute("stroke", "url(#progressGradient)");
-const circumference = 2 * Math.PI * 50;
-progressCircle.style.strokeDasharray = circumference;
-progressCircle.style.strokeDashoffset = circumference;
+const statusDot       = $("statusDot");
+const statusText      = $("statusText");
 
 // ─── Utilities ───────────────────────────────────────────────────
-function setProgress(pct, label) {
-  progressCircle.style.strokeDashoffset = circumference - (pct / 100) * circumference;
-  progressPct.textContent = `${Math.round(pct)}%`;
-  if (label) progressLabel.textContent = label;
-  psteps.forEach((el, i) => {
-    el.classList.remove("active", "done");
-    if (pct > i * 25) el.classList.add(pct >= (i + 1) * 25 ? "done" : "active");
-  });
-}
-
 function setStatus(type, text) {
   statusText.textContent = text;
   statusDot.className = "status-dot";
@@ -106,6 +66,54 @@ function showToast(msg, icon = "✓", duration = 3500) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+// ─── Gallery Functions ───────────────────────────────────────────
+function saveToGallery(url, label) {
+  const videoData = { url, label, timestamp: new Date().getTime() };
+  state.videoHistory.push(videoData);
+  localStorage.setItem("iv_gallery", JSON.stringify(state.videoHistory));
+  renderGallery();
+}
+
+function renderGallery() {
+  if (state.videoHistory.length === 0) { 
+      panelHistory.style.display = "none"; 
+      return; 
+  }
+  panelHistory.style.display = "block";
+  historyGrid.innerHTML = "";
+  
+  state.videoHistory.forEach((item, idx) => {
+    const div = document.createElement("div");
+    div.className = "history-item";
+    div.innerHTML = `
+      <div class="history-item-num">${idx + 1}</div>
+      <video src="${item.url}" muted loop preload="metadata" playsinline></video>
+      <div class="history-item-label">${item.label}</div>
+      <button class="btn-delete" onclick="deleteFromGallery(${idx}, event)" style="position:absolute; top:5px; right:5px; background:red; color:white; border:none; border-radius:5px; cursor:pointer;">🗑️</button>
+    `;
+    const vid = div.querySelector("video");
+    vid.addEventListener("mouseenter", () => vid.play());
+    vid.addEventListener("mouseleave", () => vid.pause());
+    
+    div.onclick = () => {
+      state.currentVideoUrl = item.url;
+      loadVideo(item.url);
+      showPanels("panelPlayer", "panelHistory");
+      showToast(`Loaded: ${item.label}`, "📼");
+    };
+    historyGrid.appendChild(div);
+  });
+}
+
+window.deleteFromGallery = (idx, event) => {
+  event.stopPropagation();
+  if (confirm("මේ වීඩියෝව Gallery එකෙන් ඉවත් කරන්නද?")) {
+    state.videoHistory.splice(idx, 1);
+    localStorage.setItem("iv_gallery", JSON.stringify(state.videoHistory));
+    renderGallery();
+  }
+};
+
 // ─── API Call ─────────────────────────────────────────────────────
 async function apiCall(endpoint, body) {
   const url = `${state.serverUrl}${endpoint}`;
@@ -116,13 +124,10 @@ async function apiCall(endpoint, body) {
       body: JSON.stringify(body),
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || `Server error: ${response.status}`);
+    if (!response.ok) throw new Error(data.error || `Server error`);
     return data;
   } catch (err) {
-    if (err.name === "TypeError" && err.message.includes("fetch")) {
-      throw new Error(`Server එකට connect වෙන්න බැරි වුණා! Terminal එකේ "npm start" run කළාද?`);
-    }
-    throw err;
+    throw new Error(`Server එකට connect වෙන්න බැරි වුණා!`);
   }
 }
 
@@ -141,11 +146,10 @@ dropZone.addEventListener("drop", (e) => {
   dropZone.classList.remove("drag-over");
   const file = e.dataTransfer.files[0];
   if (file && file.type.startsWith("image/")) handleImageFile(file);
-  else showToast("Image file එකක් drop කරන්න", "⚠️");
 });
 
 function handleImageFile(file) {
-  if (file.size > 20 * 1024 * 1024) { showToast("Image 20MB ට අඩු වෙන්න ඕනෑ", "⚠️"); return; }
+  if (file.size > 20 * 1024 * 1024) return showToast("Image 20MB ට අඩු වෙන්න ඕනෑ", "⚠️");
   const reader = new FileReader();
   reader.onload = (e) => {
     state.uploadedImageBase64 = e.target.result;
@@ -165,193 +169,146 @@ btnRemoveImg.addEventListener("click", (e) => {
   dropZonePreview.style.display = "none";
 });
 
-// ─── Char count ───────────────────────────────────────────────────
+// ─── Char count & Panels ──────────────────────────────────────────
 promptGenerate.addEventListener("input", () => {
   const len = promptGenerate.value.length;
   charCount.textContent = `${len} / 500`;
-  charCount.style.color = len > 450 ? "var(--warning)" : "";
   if (len > 500) promptGenerate.value = promptGenerate.value.slice(0, 500);
 });
 
-// ─── Show Panels ─────────────────────────────────────────────────
 function showPanel(id) {
-  [panelGenerate, panelProgress, panelPlayer, panelHistory].forEach(p => p.style.display = "none");
+  [panelGenerate, panelProgress, panelPlayer].forEach(p => p.style.display = "none");
   const t = $(id);
-  if (t) { t.style.display = "block"; }
+  if (t) t.style.display = "block";
 }
 function showPanels(...ids) {
-  [panelGenerate, panelProgress, panelPlayer, panelHistory].forEach(p => p.style.display = "none");
+  [panelGenerate, panelProgress, panelPlayer].forEach(p => p.style.display = "none");
   ids.forEach(id => { const p = $(id); if (p) p.style.display = "block"; });
 }
 
-// ─── Generate Button State ────────────────────────────────────────
-function setBusy(active, mode = "generate") {
-  state.isGenerating = active;
-  btnGenerate.disabled = active;
-  btnExtend.disabled = active;
-
-  if (active) {
-    const label = mode === "extend" ? "Extending..." : "Generating...";
-    btnGenerate.querySelector(".btn-content").innerHTML = `<span class="spinner"></span> ${label}`;
-    btnExtend.querySelector(".btn-content").innerHTML = `<span class="spinner"></span> Extending...`;
-    setStatus("processing", label);
-  } else {
-    btnGenerate.querySelector(".btn-content").innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 3 19 12 5 21 5 3"/></svg> Generate Video`;
-    btnExtend.querySelector(".btn-content").innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg> Extend This Video`;
-    setStatus("ready", "Ready");
-  }
+// ─── Progress Animation ───────────────────────────────────────────
+const circumference = 2 * Math.PI * 50;
+function setProgress(pct, label) {
+  progressCircle.style.strokeDashoffset = circumference - (pct / 100) * circumference;
+  progressPct.textContent = `${Math.round(pct)}%`;
+  if (label) progressLabel.textContent = label;
 }
 
 let progressInterval;
 function startProgressSim() {
   let cur = 5;
-  const stages = [
-    { target: 20, label: "AI engine connect කරනවා..." },
-    { target: 45, label: "Frames process කරනවා..." },
-    { target: 72, label: "Video render කරනවා..." },
-    { target: 90, label: "Encoding කරනවා..." },
-  ];
-  let si = 0;
   progressInterval = setInterval(() => {
-    if (si < stages.length) {
-      if (cur < stages[si].target) { cur = Math.min(cur + 1.2, stages[si].target); setProgress(cur, stages[si].label); }
-      else si++;
-    }
-  }, 400);
+    if (cur < 90) { cur += 1.5; setProgress(cur, "Processing with Z.ai..."); }
+  }, 500);
 }
 function stopProgressSim() { clearInterval(progressInterval); }
 
-async function testServerConnection() {
-  try {
-    const res = await fetch(`${state.serverUrl}/api/health`, { signal: AbortSignal.timeout(5000) });
-    return res.ok;
-  } catch { return false; }
-}
-
-// ─── 🔴 අලුත්: අවසන් රූපය ලබා ගැනීමේ ක්‍රමය (Capture Last Frame) ───
+// ─── 🔴 Capture Last Frame (Infinite Flow) ───
 function captureLastFrame() {
   return new Promise((resolve) => {
     const canvas = document.createElement("canvas");
     canvas.width = videoPlayer.videoWidth || 1280;
     canvas.height = videoPlayer.videoHeight || 720;
     const ctx = canvas.getContext("2d");
-    
-    // වීඩියෝවේ අවසාන මොහොතට යන්න
     videoPlayer.currentTime = videoPlayer.duration || 0;
-    
     setTimeout(() => {
       ctx.drawImage(videoPlayer, 0, 0, canvas.width, canvas.height);
-      const base64Image = canvas.toDataURL("image/jpeg", 0.9);
-      resolve(base64Image);
-    }, 300); // Frame එක load වෙන්න පොඩි වෙලාවක් දෙනවා
+      resolve(canvas.toDataURL("image/jpeg", 0.9));
+    }, 300);
   });
 }
 
 // ─── GENERATE (පළමු වීඩියෝව) ──────────────────────────────────────
 btnGenerate.addEventListener("click", async () => {
   const prompt = promptGenerate.value.trim();
-  if (!prompt && !state.uploadedImageBase64) {
-    showToast("Image එකක් upload කරන්න හෝ prompt එකක් ලියන්න", "⚠️");
-    return;
-  }
+  if (!prompt && !state.uploadedImageBase64) return showToast("Image එකක් හෝ prompt එකක් දෙන්න", "⚠️");
 
-  setBusy(true, "generate");
+  state.isGenerating = true;
+  btnGenerate.disabled = true;
+  setStatus("processing", "Generating...");
   showPanel("panelProgress");
-  setProgress(5, "Starting generation...");
+  setProgress(5, "Starting...");
   startProgressSim();
 
   try {
-    const data = await apiCall("/api/generate", {
-      prompt,
-      imageBase64: state.uploadedImageBase64 || null
-    });
-
+    const data = await apiCall("/api/generate", { prompt, imageBase64: state.uploadedImageBase64 });
+    
     stopProgressSim();
     setProgress(100, "✅ Video ready!");
     await sleep(600);
 
     state.currentVideoUrl = data.videoUrl;
-    state.videoHistory = [{ url: data.videoUrl, label: "Part 1" }];
     loadVideo(data.videoUrl);
-    setBusy(false);
-    showPanels("panelPlayer");
-    renderHistory();
-    showToast("Video generate වුණා! 🎬", "🎉");
+    
+    // Gallery එකට සේව් කිරීම
+    saveToGallery(data.videoUrl, `Part ${state.videoHistory.length + 1}`);
 
+    state.isGenerating = false;
+    btnGenerate.disabled = false;
+    showPanels("panelPlayer", "panelHistory");
+    showToast("Video generate වුණා! 🎬", "🎉");
   } catch (err) {
     stopProgressSim();
-    setBusy(false);
+    state.isGenerating = false;
+    btnGenerate.disabled = false;
     setStatus("error", "Error");
     showPanel("panelGenerate");
-    showToast(err.message.split("\n")[0], "❌", 7000);
+    showToast(err.message, "❌", 5000);
   }
 });
 
-// ─── 🔴 EXTEND (වීඩියෝව එක දිගට ගෙන යාම) ──────────────────────────
+// ─── EXTEND (දිගටම හැදීම) ────────────────────────────────────────
 btnExtend.addEventListener("click", async () => {
   const prompt = promptExtend.value.trim();
-  if (!prompt) { showToast("ඊළඟට වෙන දේ describe කරන්න", "⚠️"); promptExtend.focus(); return; }
-  if (!state.currentVideoUrl) { showToast("Extend කරන්න video එකක් නෑ", "⚠️"); return; }
+  if (!prompt) return showToast("ඊළඟට වෙන දේ describe කරන්න", "⚠️");
+  if (!state.currentVideoUrl) return;
 
-  setBusy(true, "extend");
+  state.isGenerating = true;
+  btnExtend.disabled = true;
   showPanel("panelProgress");
-  setProgress(5, "පරණ වීඩියෝවේ අන්තිම රූපය ලබාගනිමින් පවතී...");
+  setProgress(5, "අවසන් රූපය ලබාගනිමින් පවතී...");
   
-  // 1. පරණ වීඩියෝවේ අන්තිම රූපය ලබාගැනීම
   const lastFrameBase64 = await captureLastFrame();
-  
   startProgressSim();
 
   try {
-    // 2. අලුත් Generate API එකටම පින්තූරය යැවීම
-    const data = await apiCall("/api/generate", {
-      prompt: prompt + " (Seamless continuation)",
-      imageBase64: lastFrameBase64
-    });
+    const data = await apiCall("/api/generate", { prompt: prompt + " (Seamless continuation)", imageBase64: lastFrameBase64 });
 
     stopProgressSim();
     setProgress(100, "✅ Extension complete!");
     await sleep(600);
 
     state.currentVideoUrl = data.videoUrl;
-    state.videoHistory.push({ url: data.videoUrl, label: `Part ${state.videoHistory.length + 1}` });
-    
     loadVideo(data.videoUrl);
-    promptExtend.value = "";
-    setBusy(false);
-    showPanels("panelPlayer", "panelHistory");
-    renderHistory();
-    showToast("වීඩියෝව සාර්ථකව සම්බන්ධ විය! ✨", "🎬");
+    
+    // Gallery එකට අලුත් කොටස සේව් කිරීම
+    saveToGallery(data.videoUrl, `Part ${state.videoHistory.length + 1}`);
 
+    promptExtend.value = "";
+    state.isGenerating = false;
+    btnExtend.disabled = false;
+    showPanels("panelPlayer", "panelHistory");
+    showToast("වීඩියෝව සම්බන්ධ විය! ✨", "🎬");
   } catch (err) {
     stopProgressSim();
-    setBusy(false);
-    setStatus("error", "Error");
-    showPanels("panelPlayer");
-    showToast(err.message.split("\n")[0], "❌", 7000);
+    state.isGenerating = false;
+    btnExtend.disabled = false;
+    showPanels("panelPlayer", "panelHistory");
+    showToast(err.message, "❌", 5000);
   }
 });
 
-// ─── Video Player ─────────────────────────────────────────────────
+// ─── Video Player & Playlist Playback ─────────────────────────────
 function loadVideo(url) {
   videoPlayer.src = url;
   videoPlayer.load();
   videoPlayer.play().catch(() => {});
 }
 
-bigPlayBtn.addEventListener("click", () => {
-  videoPlayer.paused ? videoPlayer.play() : videoPlayer.pause();
-});
-videoPlayer.addEventListener("play", () => {
-  bigPlayBtn.innerHTML = `<svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>`;
-});
-videoPlayer.addEventListener("pause", () => {
-  bigPlayBtn.innerHTML = `<svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>`;
-});
+bigPlayBtn.addEventListener("click", () => { videoPlayer.paused ? videoPlayer.play() : videoPlayer.pause(); });
 
-// 🔴 බහු වීඩියෝ (Playlist) Playback ක්‍රමය
+// එක දිගට ප්ලේ වීම
 videoPlayer.addEventListener("ended", () => {
-   // දැනට ප්ලේ වෙන එක ඉවර වුණාම, ඊළඟ එකක් තියෙනවා නම් ඒක ප්ලේ වෙනවා
    const currentIndex = state.videoHistory.findIndex(v => v.url === state.currentVideoUrl);
    if (currentIndex >= 0 && currentIndex < state.videoHistory.length - 1) {
        const nextVideoUrl = state.videoHistory[currentIndex + 1].url;
@@ -365,82 +322,33 @@ btnDownload.addEventListener("click", () => {
   if (!state.currentVideoUrl) return;
   const a = document.createElement("a");
   a.href = state.currentVideoUrl;
-  a.download = `infinitevision_part_${Date.now()}.mp4`;
-  a.target = "_blank";
-  document.body.appendChild(a);
+  a.download = `video_${Date.now()}.mp4`;
   a.click();
-  document.body.removeChild(a);
   showToast("Download start වුණා!", "⬇️");
 });
 
 btnCopyUrl.addEventListener("click", () => {
   if (!state.currentVideoUrl) return;
-  navigator.clipboard.writeText(state.currentVideoUrl)
-    .then(() => showToast("URL copy වුණා!", "📋"))
-    .catch(() => showToast("Copy fail වුණා", "❌"));
+  navigator.clipboard.writeText(state.currentVideoUrl).then(() => showToast("URL copy වුණා!", "📋"));
 });
 
 btnReset.addEventListener("click", () => {
-  if (!confirm("New project start කරන්නද? Current session clear වේවි.")) return;
-  Object.assign(state, { uploadedImageBase64: null, currentVideoUrl: null, videoHistory: [] });
+  if (!confirm("New project start කරන්නද? (Gallery එකේ ඒවා මැකෙන්නේ නෑ)")) return;
+  state.uploadedImageBase64 = null;
+  state.currentVideoUrl = null;
   fileInput.value = "";
   promptGenerate.value = "";
   promptExtend.value = "";
-  charCount.textContent = "0 / 500";
   previewImg.src = "";
   dropZoneIdle.style.display = "block";
   dropZonePreview.style.display = "none";
-  historyGrid.innerHTML = "";
   showPanel("panelGenerate");
-  setStatus("ready", "Ready");
-  showToast("New project! 🆕", "✨");
+  renderGallery();
 });
-
-// ─── History ──────────────────────────────────────────────────────
-function renderHistory() {
-  if (state.videoHistory.length <= 1) { panelHistory.style.display = "none"; return; }
-  panelHistory.style.display = "block";
-  historyGrid.innerHTML = "";
-  state.videoHistory.forEach((item, idx) => {
-    const div = document.createElement("div");
-    div.className = "history-item";
-    div.innerHTML = `
-      <div class="history-item-num">${idx + 1}</div>
-      <video src="${item.url}" muted loop preload="metadata" playsinline></video>
-      <div class="history-item-label">${item.label}</div>
-    `;
-    const vid = div.querySelector("video");
-    vid.addEventListener("mouseenter", () => vid.play());
-    vid.addEventListener("mouseleave", () => vid.pause());
-    div.addEventListener("click", () => {
-      state.currentVideoUrl = item.url;
-      loadVideo(item.url);
-      showPanels("panelPlayer", "panelHistory");
-      showToast(`Loaded: ${item.label}`, "📼");
-    });
-    historyGrid.appendChild(div);
-  });
-}
-
-// ─── Settings Modal (API Key ඉවත් කර ඇත) ─────────────────────────
-function openSettingsModal() { modalBackdrop.classList.add("open"); }
-function closeSettingsModal() { modalBackdrop.classList.remove("open"); }
-
-btnSettings.addEventListener("click", openSettingsModal);
-modalClose.addEventListener("click", closeSettingsModal);
-btnModalCancel.addEventListener("click", closeSettingsModal);
-modalBackdrop.addEventListener("click", (e) => { if (e.target === modalBackdrop) closeSettingsModal(); });
 
 // ─── Init ─────────────────────────────────────────────────────────
 (function init() {
   showPanel("panelGenerate");
-  setStatus("ready", "Ready");
-  
-  testServerConnection().then(ok => {
-    if (ok) setStatus("ready", "Server Connected ✅");
-    else setStatus("error", "Server offline");
-  });
-
-  console.log("%c🎬 InfiniteVision Studio v1.2%c\nInfinite Flow Integrated", 
-    "font-size:16px;font-weight:bold;color:#3b82f6;", "color:#8899b0;");
+  setStatus("ready", "Server Connected ✅");
+  renderGallery(); // ඇප් එක ඕපන් කරද්දි Gallery එක පෙන්නනවා
 })();
