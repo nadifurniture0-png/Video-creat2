@@ -13,67 +13,60 @@ app.get('/api/health', (req, res) => {
     res.status(200).json({ status: 'ok' });
 });
 
-// ─── Z.ai (CogVideoX-Flash) Generate ───
+// 🔴 ඔයා ලබාදුන් Fal.ai API Key එක මෙතන ස්ථිරවම යොදා ඇත
+const FAL_KEY = "fc0b7e03-d519-487e-92b7-20b99a2124e7:af7b8a506444be5d657cf41527c46de2";
+
+// ─── Fal.ai (Luma Dream Machine) Generate Video ───
 app.post('/api/generate', async (req, res) => {
     try {
-        const apiToken = req.body.apiToken;
         const { prompt, imageBase64 } = req.body;
 
-        if (!apiToken) {
-            return res.status(400).json({ error: "Z.ai API Token එක Settings වලට ඇතුළත් කරන්න!" });
-        }
-
         let payload = {
-            model: "cogvideox-flash", 
-            prompt: prompt
+            prompt: prompt || "Cinematic beautiful motion",
         };
 
         if (imageBase64) {
-            payload.image_url = imageBase64;
+            payload.image_url = imageBase64; // පින්තූරයක් තිබේ නම් එය යොදාගනී
         }
 
-        let startData;
-        let retries = 4; // 🔴 සර්වර් එක බිසී නම් 4 වතාවක්ම ට්‍රයි කරනවා!
+        // 1. Fal.ai Queue එකට වීඩියෝව හදන්න යැවීම
+        const startRes = await fetch('https://queue.fal.run/fal-ai/luma-dream-machine', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Key ${FAL_KEY}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
 
-        while (retries > 0) {
-            const startRes = await fetch('https://open.bigmodel.cn/api/paas/v4/videos/generations', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${apiToken}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(payload)
-            });
+        const startData = await startRes.json();
+        if (!startRes.ok) throw new Error(startData.detail || "Fal.ai සර්වර් දෝෂයකි.");
 
-            startData = await startRes.json();
-
-            // "访问量过大" (High traffic) Error එක ආවොත්...
-            if (startData.error && startData.error.message && startData.error.message.includes("访问量过大")) {
-                console.log(`[Z.ai] Server is busy. Retrying... (${retries} attempts left)`);
-                retries--;
-                await new Promise(resolve => setTimeout(resolve, 5000)); // තත්පර 5ක් ඉඳලා ආයේ ට්‍රයි කරනවා
-            } else {
-                break; // සාර්ථක වුණොත් Loop එකෙන් එළියට එනවා
-            }
-        }
-
-        if (startData.error) throw new Error(startData.error.message || "වීඩියෝව ආරම්භ කිරීමට නොහැකි විය.");
-
-        const taskId = startData.id;
+        const requestId = startData.request_id;
         let videoUrl = null;
 
-        // වීඩියෝව හැදෙනකම් පරීක්ෂා කිරීම (Polling)
+        // 2. වීඩියෝව හැදෙනකම් පරීක්ෂා කිරීම (Polling)
         while (true) {
-            await new Promise(resolve => setTimeout(resolve, 4000));
-            const pollRes = await fetch(`https://open.bigmodel.cn/api/paas/v4/async-result/${taskId}`, {
-                method: 'GET',
-                headers: { 'Authorization': `Bearer ${apiToken}` }
-            });
-            const pollData = await pollRes.json();
+            await new Promise(resolve => setTimeout(resolve, 3000)); // තත්පර 3න් 3ට බලනවා
 
-            if (pollData.task_status === 'SUCCESS') {
-                videoUrl = pollData.video_result[0].url; break;
-            } else if (pollData.task_status === 'FAIL') {
+            const statusRes = await fetch(`https://queue.fal.run/fal-ai/luma-dream-machine/requests/${requestId}/status`, {
+                method: 'GET',
+                headers: { 'Authorization': `Key ${FAL_KEY}` }
+            });
+            const statusData = await statusRes.json();
+
+            if (statusData.status === 'COMPLETED') {
+                // වීඩියෝව හැදී අවසන් නම් URL එක ගැනීම
+                const resultRes = await fetch(`https://queue.fal.run/fal-ai/luma-dream-machine/requests/${requestId}`, {
+                    headers: { 'Authorization': `Key ${FAL_KEY}` }
+                });
+                const resultData = await resultRes.json();
+                videoUrl = resultData.video.url; 
+                break;
+            } else if (statusData.status === 'IN_QUEUE' || statusData.status === 'IN_PROGRESS') {
+                console.log(`[Fal.ai] Processing video...`);
+                continue;
+            } else {
                 throw new Error("වීඩියෝව සෑදීම අසාර්ථක විය.");
             }
         }
@@ -86,55 +79,44 @@ app.post('/api/generate', async (req, res) => {
     }
 });
 
-// ─── Z.ai (CogVideoX-Flash) Extend ───
+// ─── Fal.ai Extend Video ───
 app.post('/api/extend', async (req, res) => {
     try {
-        const apiToken = req.body.apiToken;
         const { prompt } = req.body;
 
-        if (!apiToken) return res.status(400).json({ error: "Z.ai API Token missing" });
-
         let payload = {
-            model: "cogvideox-flash", 
-            prompt: prompt + " (Cinematic continuation, exact same style and characters)" 
+            prompt: prompt + " (Seamless continuation, highly detailed, cinematic)",
         };
 
-        let startData;
-        let retries = 4; // Extend කරද්දිත් සර්වර් බිසී නම් ආයේ ට්‍රයි කරනවා
+        const startRes = await fetch('https://queue.fal.run/fal-ai/luma-dream-machine', {
+            method: 'POST',
+            headers: { 'Authorization': `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
 
-        while (retries > 0) {
-            const startRes = await fetch('https://open.bigmodel.cn/api/paas/v4/videos/generations', {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
+        const startData = await startRes.json();
+        if (!startRes.ok) throw new Error(startData.detail || "Extension error");
 
-            startData = await startRes.json();
-
-            if (startData.error && startData.error.message && startData.error.message.includes("访问量过大")) {
-                console.log(`[Z.ai] Server is busy. Retrying... (${retries} attempts left)`);
-                retries--;
-                await new Promise(resolve => setTimeout(resolve, 5000));
-            } else {
-                break;
-            }
-        }
-
-        if (startData.error) throw new Error(startData.error.message || "Extension generation failed.");
-
-        const taskId = startData.id;
+        const requestId = startData.request_id;
         let videoUrl = null;
 
         while (true) {
-            await new Promise(resolve => setTimeout(resolve, 4000));
-            const pollRes = await fetch(`https://open.bigmodel.cn/api/paas/v4/async-result/${taskId}`, {
-                headers: { 'Authorization': `Bearer ${apiToken}` }
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            const statusRes = await fetch(`https://queue.fal.run/fal-ai/luma-dream-machine/requests/${requestId}/status`, {
+                headers: { 'Authorization': `Key ${FAL_KEY}` }
             });
-            const pollData = await pollRes.json();
+            const statusData = await statusRes.json();
 
-            if (pollData.task_status === 'SUCCESS') {
-                videoUrl = pollData.video_result[0].url; break;
-            } else if (pollData.task_status === 'FAIL') {
+            if (statusData.status === 'COMPLETED') {
+                const resultRes = await fetch(`https://queue.fal.run/fal-ai/luma-dream-machine/requests/${requestId}`, {
+                    headers: { 'Authorization': `Key ${FAL_KEY}` }
+                });
+                const resultData = await resultRes.json();
+                videoUrl = resultData.video.url; 
+                break;
+            } else if (statusData.status === 'IN_QUEUE' || statusData.status === 'IN_PROGRESS') {
+                continue;
+            } else {
                 throw new Error("Extension generation failed.");
             }
         }
@@ -147,4 +129,4 @@ app.post('/api/extend', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`[Z.ai] Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`[Fal.ai] Server running on port ${PORT}`));
